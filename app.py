@@ -101,11 +101,15 @@ def loss_curves():
     fig = go.Figure()
     for name, losses in meta["loss_curves"].items():
         dash = "dot" if "nn.Module" in name else "solid"
-        fig.add_trace(go.Scatter(y=losses, name=name, line=dict(color=COLORS[name], dash=dash)))
+        fig.add_trace(go.Scatter(x=list(range(1, len(losses) + 1)), y=losses, name=name, line=dict(color=COLORS[name], dash=dash)))
     fig.update_layout(title=f"PyTorch training loss (lr={meta['learning_rate']}, alpha={meta['alpha']})",
-                      xaxis_title="Epoch (full-batch step)", yaxis_title="Loss (log scale)",
-                      yaxis_type="log", height=380)
+                      xaxis_title="Epoch (full-batch step, log scale)", yaxis_title="Loss (log scale)",
+                      xaxis_type="log", yaxis_type="log", height=380)
     return fig
+
+
+def ablation_table():
+    return pd.DataFrame(meta["feature_ablation"]).round(2)
 
 
 def agreement_table():
@@ -149,7 +153,7 @@ def hourly_profile():
 def temp_relationship():
     binned = data.assign(temp_c=(data["temp"] * 41).round()).groupby("temp_c")["cnt"].mean().reset_index()
     fig = px.line(binned, x="temp_c", y="cnt", markers=True)
-    fig.update_layout(title="Average rentals by temperature: the drop-off at high temperature motivates temp^2",
+    fig.update_layout(title="Average rentals by temperature: a curve that flattens above ~30°C, which temp^2 lets a linear model follow",
                       xaxis_title="Temperature (°C)", yaxis_title="Mean rentals", height=380)
     return fig
 
@@ -200,6 +204,9 @@ with gr.Blocks(title="Bike demand forecast") as demo:
     with gr.Tab("Model comparison"):
         gr.Markdown("### Test-set metrics (bikes per hour)")
         gr.Dataframe(metrics_table(), interactive=False)
+        gr.Markdown("The three implementations produce the same predictions to within 0.001 bikes, "
+                    "so their points and lines sit exactly on top of each other and only the last one drawn "
+                    "is visible. Tick a baseline to see how a naive forecast compares.")
         series = gr.CheckboxGroup(MODELS + BASELINES, value=MODELS, label="Series to show")
         scatter = gr.Plot(pred_vs_actual(MODELS))
         week = gr.Dropdown(WEEK_CHOICES, value=WEEK_CHOICES[0], label="Week to inspect")
@@ -219,7 +226,10 @@ with gr.Blocks(title="Bike demand forecast") as demo:
         gr.Dataframe(agreement_table(), interactive=False)
         gr.Plot(loss_curves())
 
-    with gr.Tab("Distributions"):
+    with gr.Tab("Features & distributions"):
+        gr.Markdown("### Feature ablation: each engineering step added in turn "
+                    "(least squares, trained on train, scored on validation, bikes/hour)")
+        gr.Dataframe(ablation_table(), interactive=False)
         feat = gr.Dropdown(list(RAW_FEATURES), value=list(RAW_FEATURES)[0], label="Variable")
         split_by = gr.Radio(["none", "split", "workingday"], value="none", label="Colour by")
         dist = gr.Plot(distribution(list(RAW_FEATURES)[0], "none"))

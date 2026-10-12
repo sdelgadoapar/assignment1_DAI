@@ -30,7 +30,7 @@ from features import build_features, make_target, prepare_dataset
 SEED = 42
 ARTIFACTS = Path("artifacts")
 ALPHAS = [0.0, 1.0, 10.0, 100.0, 1000.0]      # ridge strength candidates
-LEARNING_RATES = [0.01, 0.03, 0.1, 0.3]       # for both PyTorch versions
+LEARNING_RATES = [0.01, 0.03, 0.1, 0.3, 1.0]  # for both PyTorch versions
 EPOCHS = 3000                                  # full-batch gradient steps
 
 
@@ -137,6 +137,39 @@ def predict_torch_nn(model, X):
 
 
 # --------------------------------------------------------------------------
+# Feature ablation: does each engineering step earn its place?
+# --------------------------------------------------------------------------
+def feature_ablation(df, X_full, is_train, is_val):
+    """Add the engineered features one step at a time and score each version
+    on validation (plain least squares, alpha=0, train -> val)."""
+    raw = df[["hr", "workingday", "holiday", "mnth", "yr", "weathersit", "temp", "hum", "windspeed"]].astype(float)
+    hours_shared = pd.DataFrame(
+        {f"hr{h:02d}": X_full[f"hr{h:02d}_work"] + X_full[f"hr{h:02d}_off"] for h in range(1, 24)})
+    calendar = X_full[[c for c in X_full.columns if c.startswith(("month_", "weather_"))]
+                      + ["workingday", "holiday", "year_2012", "temp", "humidity", "windspeed"]]
+    hour_by_daytype = X_full[[c for c in X_full.columns if c.startswith("hr")]]
+
+    steps = [
+        ("1. Raw columns as numbers, raw target", raw, False),
+        ("2. + hour/month/weather as categories", pd.concat([hours_shared, calendar], axis=1), False),
+        ("3. + separate hour profile per day type", pd.concat([hour_by_daytype, calendar], axis=1), False),
+        ("4. + log(1+cnt) target", pd.concat([hour_by_daytype, calendar], axis=1), True),
+        ("5. + temperature squared", pd.concat([hour_by_daytype, calendar, X_full[["temp_sq"]]], axis=1), True),
+        ("6. + same hour last week (final)", X_full, True),
+    ]
+    counts = df["cnt"].to_numpy()
+    rows = []
+    for label, X, log_target in steps:
+        sc = StandardScaler().fit(X[is_train])
+        y = np.log1p(counts) if log_target else counts
+        m = Ridge(alpha=0.0).fit(sc.transform(X[is_train]), y[is_train])
+        pred = m.predict(sc.transform(X[is_val]))
+        pred = to_counts(pred) if log_target else np.clip(pred, 0, None)
+        rows.append({"step": label, "n_features": X.shape[1], **evaluate(counts[is_val], pred)})
+    return rows
+
+
+# --------------------------------------------------------------------------
 # Pipeline
 # --------------------------------------------------------------------------
 def main():
@@ -171,6 +204,10 @@ def main():
         "Baseline: same hour last week": df["cnt_lag_week"].to_numpy(),
         "Baseline: hour x day-type average": profile_pred,
     }
+
+    ablation = feature_ablation(df, X_all, is_train, is_val)
+    print("\nFeature ablation (validation, bikes/hour):")
+    print(pd.DataFrame(ablation).round(2).to_string(index=False))
 
     # ---- Stage 1: tune on train, judge on validation ----------------------
     scaler = StandardScaler().fit(X_all[is_train])
@@ -271,6 +308,7 @@ def main():
         "learning_rate": best_lr,
         "epochs": EPOCHS,
         "split_rows": {"train": int(is_train.sum()), "val": int(is_val.sum()), "test": int(is_test.sum())},
+        "feature_ablation": ablation,
         "alpha_search": alpha_results,
         "lr_search": lr_results,
         "test_metrics": results,
