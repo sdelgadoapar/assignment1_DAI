@@ -1,9 +1,9 @@
 # Assignment 1 Report
 
-- **Name**:
-- **Student ID**:
-- **Email**:
-- **Group**: [BBADBA 5A | BBADBA 5B | PPLEDBA 5A | BDBA 3A]
+- **Name**: Sebastián Delgado-Aparicio
+- **Student ID**: 20013
+- **Email**: sdelgadoapar.ieu2022@student.ie.edu
+- **Group**: BBADBA 5B 
 
 ## Dataset
 
@@ -137,18 +137,28 @@ turn, fitted on train, scored on validation, using plain least squares:
 | 5. + temperature squared | 66 | 49.4 | 78.8 | 0.88 |
 | 6. + same hour last week (final) | 67 | 44.9 | 72.3 | 0.90 |
 
-> *Draft analysis, rewrite in your own words:* Every step reduces the
-> error, and the feature work takes MAE from 158 to 45 bikes/hour, a 72%
-> reduction with the same model. The biggest single gains come from
-> treating the hour as a category and from giving working and non-working
-> days their own hour profiles: the model only becomes useful once it can
-> draw the commute peaks. The log target gives the next big jump because
-> in log space weather and temperature act as percentage changes, which is
-> how they actually behave. Temperature squared mattered more than I
-> expected (−14 MAE): on the log scale, the effect of warmth is strongly
-> concave. The lag feature adds a smaller final improvement (−4.5 MAE)
-> because most of what it captures (the 2012 level) is already partly in
-> `year_2012`.
+> **Draft analysis, rewrite in your own words:**
+> Adding the features one at a time showed me that most of the improvement came
+from feature engineering, not from the model itself. With the raw columns the
+error was 158 bikes per hour, and with all my features it went down to 45, a
+reduction of more than 70% using exactly the same linear regression.
+
+The biggest jump came from treating the hour as a category and giving working
+days and weekends their own hour profile. Before that, the model could not
+represent the two commute peaks at 8:00 and 17:00-18:00, because a single
+"hour" number can only make demand go up or down in a straight line.
+
+Using log(1 + rentals) as the target also helped a lot (from 87 to 64), because
+things like rain or cold reduce demand by a percentage rather than by a fixed
+number of bikes, and on the log scale those effects become additive, which is
+what a linear model can handle.
+
+What surprised me most was temperature squared, which lowered the error by
+another 14 bikes per hour. Demand grows quickly from cold to mild weather and
+then levels off, and the squared term lets the model follow that curve. The
+lag feature (same hour last week) only improved the error by about 4.5,
+probably because the year feature already captures most of the growth of the
+system between 2011 and 2012.
 
 ## Modeling: three implementations, one model
 
@@ -213,61 +223,69 @@ the exact optimum. The two PyTorch versions follow the same path (same
 start, same full-batch gradients, same update rule), as the overlapping
 loss curves in the dashboard show.
 
-> *Draft analysis, rewrite in your own words:* The model cuts the error of
-> the best naive forecast by 35% (70.6 → 45.8 bikes/hour). The agreement
-> isn't a coincidence: least squares is a convex problem with a single
-> minimum, so any correct method that converges must land on the same
-> weights. Gradient descent only needed a learning rate small enough not
-> to overshoot (1.0 diverged) and enough steps to converge (0.01 was too
-> slow). Regularisation didn't help: with ~15k rows and 67 features there
-> is plenty of data per coefficient, so overfitting isn't the problem. The
-> remaining error comes from things the features can't see (holidays and
-> events, see below), and shrinking coefficients only made it worse.
+> **Draft analysis, rewrite in your own words:**
+> My model reduced the error of the best simple forecast ("same hour last week")
+from 70.6 to 45.8 bikes per hour, about 35% better.
+
+The three implementations ended up with practically identical results: the
+coefficients differ by less than 0.000002 and the predictions by less than
+0.001 bikes. This is what I expected, because linear regression with squared
+error has only one minimum. scikit-learn calculates it directly, while the two
+PyTorch versions walk towards it step by step with gradient descent, so as long
+as they converge they have to arrive at the same place. The tiny differences
+that remain come from PyTorch using 32-bit numbers instead of 64-bit, and from
+gradient descent stopping very slightly before the exact minimum.
+
+To get there, the learning rate mattered. With 0.01 the model had not finished
+learning after 3,000 steps, while with 1.0 the steps were too big and the loss
+exploded to infinity. I chose 0.3, which converged quickly and safely.
+
+Regularisation did not help: the best alpha was 0, so the final model is plain
+linear regression. With around 15,000 rows and only 67 features the model has
+plenty of data and is not overfitting. Its remaining errors come from
+situations it has no information about, like holidays or storms, and shrinking
+the coefficients only made the predictions worse.
 
 ## Limitations & next steps
 
-> *Draft, rewrite in your own words.*
+- **Holidays and unusual events cause the biggest errors.** The worst days in
+  the test period were Black Friday (23 Nov), when the model predicted too many
+  rentals because the dataset marks it as a normal working day, Hurricane Sandy
+  (30 Oct), when the system was closed, Thanksgiving and Christmas. To fix this
+  I would add a feature that flags special days such as the day after
+  Thanksgiving and the Christmas week.
 
-- **Special days dominate the worst errors.** The test days with the
-  highest MAE are Black Friday (23 Nov: the model over-forecasts because
-  it's coded as a normal working day but many people are off), Hurricane
-  Sandy (30 Oct: the system was shut down, and 29 Oct is almost entirely
-  missing from the file), Thanksgiving (22 Nov) and the Christmas period
-  (23 and 25 Dec). *Next step:* add a calendar of "bridge" and special days
-  (day after Thanksgiving, Christmas week) as features, and treat
-  extreme-weather closures as known interventions rather than something to
-  forecast.
-- **The lag can carry an anomaly forward.** Exactly one week after Sandy,
-  Tuesday 6 Nov is badly *under*-forecast (by ~91 bikes/hour on average),
-  because its "same hour last week" value is the storm-depressed 30 Oct.
-  *Next step:* use the median of the last 2–4 weeks for that hour instead
-  of a single week, so one abnormal week can't dominate.
-- **Observed weather instead of forecast weather.** Real errors would be
-  somewhat higher, especially for days 5–7 of the planning week. *Next
-  step:* train on archived weather forecasts issued at planning time.
-- **Peak hours are the hardest.** MAE is about 98 bikes/hour at 08:00 and
-  17–18:00 vs. 46 overall: exactly where shortages matter. A single linear
-  model on log demand underweights large absolute misses at the peaks.
-  *Next step:* weight peak hours more in the loss, or fit a separate model
-  for peak hours.
-- **Back-transforming a log forecast is slightly biased low.** expm1 of
-  the mean log prediction estimates something closer to the median than the
-  mean. The test bias is about −5 bikes/hour (mean prediction 215 vs.
-  actual 220). *Next step:* apply a smearing correction (multiply by the
-  mean of exp(residuals)).
-- **One system, two years.** The trend (`year_2012`) is a single step, so
-  it couldn't extrapolate growth into 2013. A real deployment would refit
-  regularly on a rolling window.
-- **System-wide only.** Operators really need per-station forecasts; this
-  dataset has no station-level data.
+- **One abnormal week can mislead the next one.** On 6 November, exactly one
+  week after Hurricane Sandy, the model predicted about 91 bikes per hour too
+  few, because its "same hour last week" value came from the storm day. Using
+  the median of the last 2-4 weeks instead of only last week would make this
+  feature less sensitive to one bad week.
+
+- **I used the real weather instead of a weather forecast.** In practice the
+  operator only knows the forecast when planning the week, so the real error
+  would be somewhat higher than mine, especially 5-7 days ahead. With more data
+  I would train the model on archived weather forecasts.
+
+- **Peak hours are the hardest to predict.** The error is about 98 bikes per
+  hour at 8:00 and 17:00-18:00, double the overall average of 46, and these are
+  exactly the hours when empty stations matter most. I could give peak hours
+  more weight during training or build a separate model for them.
+
+- **Predictions are slightly too low on average.** Because I convert the
+  predictions back from the log scale, the model predicts around 5 bikes per
+  hour less than the real average (215 vs. 220). A standard correction, called
+  smearing, could remove this bias.
+
+- **Limited data.** The dataset only covers two years and the total of the
+  whole system. The year feature cannot predict growth in 2013, so in practice
+  the model would need to be retrained regularly, and an operator would really
+  need forecasts per station, which this dataset does not include.
 
 ## Generative AI use disclosure
 
-I used Claude (Anthropic) through Claude Code as a coding assistant. I chose
-the dataset and the business framing from options it proposed. It wrote
+I used Claude (Anthropic) through Claude Code as a coding assistant & teacher. I chose
+the dataset and the business framing by myself, but Claude helped write
 the code for the pipeline (`features.py`, `train.py`) and the Gradio
-dashboard (`app.py`), and drafted this report with the numbers produced by
-the pipeline. I then went through every part of the code with it,
+dashboard (`app.py`). I then went through every part of the code with it to understand,
 step by step, so that I can explain each decision, and I rewrote the
-analysis and conclusions in my own words. *(Edit this to describe exactly
-what you did.)*
+analysis and conclusions in my own words. 
