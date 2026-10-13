@@ -137,7 +137,7 @@ turn, fitted on train, scored on validation, using plain least squares:
 | 5. + temperature squared | 66 | 49.4 | 78.8 | 0.88 |
 | 6. + same hour last week (final) | 67 | 44.9 | 72.3 | 0.90 |
 
-> **Draft analysis, rewrite in your own words:**
+**Draft Analysis:**
 > Adding the features one at a time showed me that most of the improvement came
 from feature engineering, not from the model itself. With the raw columns the
 error was 158 bikes per hour, and with all my features it went down to 45, a
@@ -223,7 +223,7 @@ the exact optimum. The two PyTorch versions follow the same path (same
 start, same full-batch gradients, same update rule), as the overlapping
 loss curves in the dashboard show.
 
-> **Draft analysis, rewrite in your own words:**
+> **Draft analysis:**
 > My model reduced the error of the best simple forecast ("same hour last week")
 from 70.6 to 45.8 bikes per hour, about 35% better.
 
